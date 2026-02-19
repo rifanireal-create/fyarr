@@ -441,25 +441,25 @@ task.spawn(function()
         for i, u in pairs(users) do
             if i > 1 then desc = desc .. "\n\n" end
 
-            local rt2    = math.max(1, os.time() - (u.StartTime or os.time()))
+            local rt2     = math.max(1, os.time() - (u.StartTime or os.time()))
             local rateVal = (u.RatePerHour and u.RatePerHour > 0) and u.RatePerHour
                 or (math.abs(u.Earned or 0) / (rt2 / 3600))
             local earned  = u.Earned or 0
             local pct     = math.min(100, math.floor(((u.Bounty or 0) / 30000000) * 100))
+            local sign    = earned >= 0 and "+" or "-"
 
-            desc = desc .. string.format("### `%02d` — ||%s||\n", i, censor(u.User or "???"))
-            desc = desc .. string.format("> `%d fps`  `%dms`\n\n", u.FPS or 0, u.Ping or 0)
-
-            desc = desc .. string.format("%s `%d%%`\n", bar(u.Bounty or 0, 30000000), pct)
-            desc = desc .. string.format("`%.2fM / 30M`\n\n", (u.Bounty or 0) / 1e6)
-
-            desc = desc .. string.format("**%s%s** — `%s/hr`\n",
-                earned >= 0 and "+" or "-", fmt(math.abs(earned)), compact(rateVal))
-            desc = desc .. string.format("> 💰 `%s`  ⚔️ `%d kills`  💀 `%s lost`",
-                fmt(u.Bounty or 0), u.Kills or 0, fmt(u.BountyLost or 0))
+            desc = desc .. string.format("**#%02d** | ||%s||   %d fps  %dms\n", i, censor(u.User or "???"), u.FPS or 0, u.Ping or 0)
+            desc = desc .. "```\n"
+            desc = desc .. string.format("%s  %d%%\n", bar(u.Bounty or 0, 30000000), pct)
+            desc = desc .. string.format("%.2fM / 30M\n\n", (u.Bounty or 0) / 1e6)
+            desc = desc .. string.format("%s%s  /  %s/hr\n\n", sign, fmt(math.abs(earned)), compact(rateVal))
+            desc = desc .. string.format("Bounty  %s\n", fmt(u.Bounty or 0))
+            desc = desc .. string.format("Kills   %d\n", u.Kills or 0)
+            desc = desc .. string.format("Lost    %s\n", fmt(u.BountyLost or 0))
+            desc = desc .. "```"
         end
 
-        desc = desc .. string.format("\n\n> ⏱ `%02dh %02dm %02ds`  •  `%d` active",
+        desc = desc .. string.format("\n> %02dh %02dm %02ds  |  %d active",
             math.floor(maxTime / 3600), math.floor((maxTime % 3600) / 60), maxTime % 60, #users)
         desc = desc .. "\n-# [discord.gg/SkrS8Epa](https://discord.gg/SkrS8Epa)"
 
