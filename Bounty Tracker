@@ -439,41 +439,43 @@ task.spawn(function()
 
         local desc = ""
         for i, u in pairs(users) do
-            if i > 1 then desc = desc .. "\n\n" end
+            if i > 1 then desc = desc .. "\n─────────────────────────\n\n" end
 
-            desc = desc .. string.format("### USER %02d \xe2\x80\xa2 ||%s||\n", i, censor(u.User or "???"))
-            desc = desc .. string.format("> **Performance** `%d FPS` `%dms`\n\n", u.FPS or 0, u.Ping or 0)
+            -- Header: user + performance inline
+            desc = desc .. string.format("-# `#%02d` \xe2\x80\xa2 ||%s||  `%d fps`  `%dms`\n",
+                i, censor(u.User or "???"), u.FPS or 0, u.Ping or 0)
 
+            -- Progress bar
             local pct = math.min(100, math.floor(((u.Bounty or 0) / 30000000) * 100))
             desc = desc .. "```\n"
-            desc = desc .. pct .. "%\n"
-            desc = desc .. bar(u.Bounty or 0, 30000000) .. "\n"
-            desc = desc .. string.format("%.1fM / 30M\n", (u.Bounty or 0) / 1e6)
+            desc = desc .. string.format("%s  %d%%\n", bar(u.Bounty or 0, 30000000), pct)
+            desc = desc .. string.format("%.2fM / 30M\n", (u.Bounty or 0) / 1e6)
             desc = desc .. "```\n"
 
-            -- Rate: use stored rolling rate if available, else lifetime avg
+            -- Rate
             local rt2 = math.max(1, os.time() - (u.StartTime or os.time()))
             local rateVal = (u.RatePerHour and u.RatePerHour > 0) and u.RatePerHour
                 or (math.abs(u.Earned or 0) / (rt2 / 3600))
             local rate = compact(rateVal) .. "/hr"
-            local kills = u.Kills or 0
+            local earned = u.Earned or 0
+            local sign = earned >= 0 and "+" or "-"
 
+            -- Stats block
             desc = desc .. "```diff\n"
-            desc = desc .. string.format("%s %s (%s)\n",
-                ((u.Earned or 0) >= 0 and "+") or "-",
-                fmt(math.abs(u.Earned or 0)), rate)
-            desc = desc .. string.format("  Current Bounty : %s\n",  fmt(u.Bounty or 0))
-            desc = desc .. string.format("  Kills          : %d\n",  kills)
-            desc = desc .. string.format("  Bounty Lost    : %s\n",  fmt(u.BountyLost or 0))
+            desc = desc .. string.format("%s %s  \xe2\x86\x97 %s\n", sign, fmt(math.abs(earned)), rate)
+            desc = desc .. string.format("  \xe2\x98\x86 Bounty   %s\n", fmt(u.Bounty or 0))
+            desc = desc .. string.format("  \xe2\x9c\x96 Kills    %d\n",  u.Kills or 0)
+            desc = desc .. string.format("  \xe2\x86\x93 Lost     %s\n",  fmt(u.BountyLost or 0))
             desc = desc .. "```"
         end
 
-        desc = desc .. "\n```yaml\n"
-        desc = desc .. string.format("Runtime: %02dh %02dm %02ds\n",
-            math.floor(maxTime / 3600), math.floor((maxTime % 3600) / 60), maxTime % 60)
-        desc = desc .. string.format("Active Accounts: %d\n", #users)
+        -- Footer runtime
+        desc = desc .. "\n```fix\n"
+        desc = desc .. string.format("\xe2\x8f\xb1 %02dh %02dm %02ds  \xe2\x80\xa2  %d account%s active\n",
+            math.floor(maxTime / 3600), math.floor((maxTime % 3600) / 60), maxTime % 60,
+            #users, #users > 1 and "s" or "")
         desc = desc .. "```"
-        desc = desc .. "\n> 🌟 **[Click Here — Support & Join Our Server for Updates](https://discord.gg/SkrS8Epa)**"
+        desc = desc .. "\n-# \xe2\x9c\xa6 [Join for updates](https://discord.gg/SkrS8Epa)"
 
         pcall(function()
             req({
