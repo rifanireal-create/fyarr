@@ -82,6 +82,36 @@ local session = {
 local milestoneReached = {}
 local fps, ping, samples = 0, 0, 0
 
+-- Rolling window for accurate rate/hr (last 10 min)
+local rateWindow = {}
+local WINDOW_SEC = 600
+
+local function pushRate(amount)
+    table.insert(rateWindow, {t = os.time(), e = amount})
+    local now = os.time()
+    while #rateWindow > 0 and (now - rateWindow[1].t) > WINDOW_SEC do
+        table.remove(rateWindow, 1)
+    end
+end
+
+local function getRate()
+    local now = os.time()
+    while #rateWindow > 0 and (now - rateWindow[1].t) > WINDOW_SEC do
+        table.remove(rateWindow, 1)
+    end
+    if #rateWindow >= 2 then
+        local span = now - rateWindow[1].t
+        if span >= 30 then
+            local total = 0
+            for _, v in pairs(rateWindow) do total = total + v.e end
+            return (total / span) * 3600
+        end
+    end
+    -- Fallback: lifetime average
+    local rt = math.max(1, now - session.start)
+    return (session.earned / rt) * 3600
+end
+
 local function load()
     if not fsOk or not isfile(sessionFile) then return end
     local ok, data = pcall(function() return HttpService:JSONDecode(readfile(sessionFile)) end)
@@ -121,9 +151,11 @@ local function compact(n)
 end
 
 local function bar(cur, max)
-    local p    = math.clamp(cur / math.max(max, 1), 0, 1)
-    local fill = math.floor(p * 20)
-    return string.rep("\xe2\x96\x88", fill) .. string.rep("\xe2\x96\x91", 20 - fill)
+    local p     = math.clamp(cur / math.max(max, 1), 0, 1)
+    local total = 21
+    local fill  = math.floor(p * total)
+    local empty = total - fill
+    return string.rep("\xe2\x97\x8f", fill) .. string.rep("\xe2\x97\x8b", empty)
 end
 
 local function censor(name)
@@ -284,6 +316,7 @@ task.spawn(function()
                     -- Bounty naik = kill
                     session.earned = session.earned + c
                     session.kills  = session.kills + 1
+                    pushRate(c)
                     warn("[Tracker] Kill! +" .. c .. " | Kills: " .. session.kills)
                 else
                     -- Bounty turun = mati
@@ -299,16 +332,17 @@ task.spawn(function()
         if type(writefile) == "function" then
             pcall(function()
                 writefile(userFile, HttpService:JSONEncode({
-                    User       = Player.Name,
-                    Earned     = session.earned,
-                    Kills      = session.kills,
-                    BountyLost = session.bountyLost,
-                    Bounty     = lb,
-                    Team       = lt,
-                    FPS        = (samples > 0 and math.floor(fps / samples)) or 0,
-                    Ping       = (samples > 0 and math.floor(ping / samples)) or 0,
-                    StartTime  = session.start,
-                    LastUpdate = os.time()
+                    User        = Player.Name,
+                    Earned      = session.earned,
+                    Kills       = session.kills,
+                    BountyLost  = session.bountyLost,
+                    Bounty      = lb,
+                    Team        = lt,
+                    FPS         = (samples > 0 and math.floor(fps / samples)) or 0,
+                    Ping        = (samples > 0 and math.floor(ping / samples)) or 0,
+                    StartTime   = session.start,
+                    RatePerHour = getRate(),
+                    LastUpdate  = os.time()
                 }))
                 writefile(sessionFile, HttpService:JSONEncode({
                     Earned     = session.earned,
@@ -411,17 +445,17 @@ task.spawn(function()
             desc = desc .. string.format("> **Performance** `%d FPS` `%dms`\n\n", u.FPS or 0, u.Ping or 0)
 
             local pct = math.min(100, math.floor(((u.Bounty or 0) / 30000000) * 100))
-            desc = desc .. "```ansi\n"
+            desc = desc .. "```\n"
+            desc = desc .. pct .. "%\n"
             desc = desc .. bar(u.Bounty or 0, 30000000) .. "\n"
-            desc = desc .. string.format("%d%% Progress to 30M\n", pct)
+            desc = desc .. string.format("%.1fM / 30M\n", (u.Bounty or 0) / 1e6)
             desc = desc .. "```\n"
 
-            -- Calculate rate (bounty per hour)
-            local rt2 = os.time() - (u.StartTime or os.time())
-            local rate = "0/hr"
-            if rt2 > 0 then
-                rate = compact(math.abs(u.Earned or 0) / (rt2 / 3600)) .. "/hr"
-            end
+            -- Rate: use stored rolling rate if available, else lifetime avg
+            local rt2 = math.max(1, os.time() - (u.StartTime or os.time()))
+            local rateVal = (u.RatePerHour and u.RatePerHour > 0) and u.RatePerHour
+                or (math.abs(u.Earned or 0) / (rt2 / 3600))
+            local rate = compact(rateVal) .. "/hr"
             local kills = u.Kills or 0
 
             desc = desc .. "```diff\n"
