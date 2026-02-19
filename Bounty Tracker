@@ -142,16 +142,20 @@ local function censor(name)
 end
 
 local function getData()
-    local t  = (Player.Team and Player.Team.Name) or "Neutral"
-    local b  = 0
-    local ls = Player:FindFirstChild("leaderstats")
-    if ls then
-        local bv = ls:FindFirstChild("Bounty/Honor")
-            or ls:FindFirstChild("Bounty")
-            or ls:FindFirstChild("Honor")
-        if bv then b = bv.Value end
-    end
-    return t, b
+    local ok, t, b = pcall(function()
+        local t = (Player.Team and Player.Team.Name) or "Neutral"
+        local b = 0
+        local ls = Player:FindFirstChild("leaderstats")
+        if ls then
+            local bv = ls:FindFirstChild("Bounty/Honor")
+                or ls:FindFirstChild("Bounty")
+                or ls:FindFirstChild("Honor")
+            if bv then b = bv.Value end
+        end
+        return t, b
+    end)
+    if ok then return t, b end
+    return "Neutral", 0
 end
 
 -- =============================================
