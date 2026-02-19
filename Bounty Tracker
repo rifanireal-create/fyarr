@@ -461,7 +461,6 @@ task.spawn(function()
 
         desc = desc .. string.format("\n> %02dh %02dm %02ds  |  %d active",
             math.floor(maxTime / 3600), math.floor((maxTime % 3600) / 60), maxTime % 60, #users)
-        desc = desc .. "\n-# [discord.gg/SkrS8Epa](https://discord.gg/SkrS8Epa)"
 
         pcall(function()
             req({
@@ -473,7 +472,8 @@ task.spawn(function()
                     avatar_url = avatar,
                     embeds = {{
                         author = {
-                            name     = "O N I X Y   H U B",
+                            name     = "Click Here — Support & Join Our Server for Updates",
+                            url      = "https://discord.gg/SkrS8Epa",
                             icon_url = "https://cdn.discordapp.com/emojis/1258157823716757584.gif?size=128&animated=true"
                         },
                         title       = "<a:_:1258451393019248650> Bounty Tracker System",
