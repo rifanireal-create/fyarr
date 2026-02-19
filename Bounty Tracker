@@ -1,1 +1,475 @@
-print ("kontol bapak kau peah")
+--[[
+╔══════════════════════════════════════════╗
+║         O N I X Y   H U B               ║
+║         Bounty Tracker v1.2             ║
+╠══════════════════════════════════════════╣
+║  RULES OF USAGE:                         ║
+║  [1] Do not distribute without permission║
+║  [2] Do not claim as your own           ║
+║  [3] Do not sell in any form            ║
+║  © 2026 Onixy Hub - All Rights Reserved ║
+╚══════════════════════════════════════════╝
+]]
+
+print("O N I X Y   H U B  |  BOUNTY TRACKER 2026")
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+print("📢 Join Discord for Updates & Support!")
+print("🔗 discord.gg/SkrS8Epa")
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+local HttpService     = game:GetService("HttpService")
+local Players         = game:GetService("Players")
+local Stats           = game:GetService("Stats")
+local StarterGui      = game:GetService("StarterGui")
+local TextChatService = game:GetService("TextChatService")
+local Player          = Players.LocalPlayer
+
+local config  = getgenv().OnixyTracker or {}
+local wh      = config.discord or {}
+local url     = wh.webhook_url or ""
+local uid     = wh.user_id or ""
+local enabled = wh.enabled or false
+
+if not enabled then return end
+
+local folder            = "OnixyHub_Global"
+local interval, timeout = 45, 500
+
+-- Clear output every 50s
+task.spawn(function()
+    while true do
+        task.wait(50)
+        pcall(function() game:GetService("LogService"):ClearOutput() end)
+    end
+end)
+
+local avatar     = "https://cdn.discordapp.com/attachments/1405961118668558447/1473585515667259567/ChatGPT_Image_18_Feb_2026_14.42.28.png"
+local footerIcon = "https://cdn.discordapp.com/emojis/1465570906481885237.webp?size=128&animated=true"
+local icon       = "rbxassetid://49327490"
+
+local fsOk = type(isfolder)  == "function" and type(makefolder) == "function"
+          and type(isfile)    == "function" and type(readfile)   == "function"
+          and type(writefile) == "function"
+
+if fsOk then pcall(function()
+    if not isfolder(folder) then makefolder(folder) end
+end) end
+
+local userFile    = folder .. "/User_"    .. Player.Name .. ".json"
+local sessionFile = folder .. "/Session_" .. Player.Name .. ".json"
+local heartbeat   = folder .. "/_MasterHeartbeat.txt"
+
+if fsOk and not _G.EliasLoaded then
+    _G.EliasLoaded = true
+    pcall(function()
+        if isfile(heartbeat) then
+            local t = tonumber(readfile(heartbeat)) or 0
+            if os.time() - t > 60 then pcall(delfile, heartbeat) end
+        end
+    end)
+end
+
+-- =============================================
+-- SESSION DATA
+-- =============================================
+local session = {
+    earned     = 0,
+    kills      = 0,
+    bountyLost = 0,
+    start      = os.time(),
+    milestones = {5e6, 10e6, 15e6, 20e6, 25e6, 30e6}
+}
+local milestoneReached = {}
+local fps, ping, samples = 0, 0, 0
+
+local function load()
+    if not fsOk or not isfile(sessionFile) then return end
+    local ok, data = pcall(function() return HttpService:JSONDecode(readfile(sessionFile)) end)
+    if ok and data and (os.time() - (data.LastSave or 0)) < 86400 then
+        session.earned     = data.Earned     or 0
+        session.kills      = data.Kills      or 0
+        session.bountyLost = data.BountyLost or 0
+        session.start      = data.StartTime  or os.time()
+    end
+end
+
+load()
+
+task.delay(3, function()
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title    = "Onixy Hub | Bounty Tracker",
+            Text     = "Bounty Tracker v1.2 active! Join discord.gg/SkrS8Epa",
+            Icon     = icon,
+            Duration = 8
+        })
+    end)
+end)
+
+-- =============================================
+-- UTILITIES
+-- =============================================
+local function fmt(n)
+    return tostring(math.floor(tonumber(n) or 0)):reverse():gsub("%d%d%d", "%1,"):reverse():gsub("^,", "")
+end
+
+local function compact(n)
+    local v = tonumber(n) or 0
+    if v >= 1e6 then return string.format("%.1fM", v / 1e6)
+    elseif v >= 1e3 then return string.format("%.1fk", v / 1e3) end
+    return tostring(math.floor(v))
+end
+
+local function bar(cur, max)
+    local p    = math.clamp(cur / math.max(max, 1), 0, 1)
+    local fill = math.floor(p * 20)
+    return string.rep("\xe2\x96\x88", fill) .. string.rep("\xe2\x96\x91", 20 - fill)
+end
+
+local function censor(name)
+    local n = #name
+    if n == 0 then return "*" end
+    local r = ""
+    if n <= 3 then
+        r = name:sub(1, 1) .. string.rep("*", n - 1)
+    elseif n <= 5 then
+        r = name:sub(1, 1) .. "*" .. name:sub(3, n - 1) .. "*"
+    else
+        for i = 1, n do r = r .. (i % 3 == 0 and "*" or name:sub(i, i)) end
+    end
+    return r
+end
+
+local function getData()
+    local ok, t, b = pcall(function()
+        local t = (Player.Team and Player.Team.Name) or "Neutral"
+        local b = 0
+        local ls = Player:FindFirstChild("leaderstats")
+        if ls then
+            local bv = ls:FindFirstChild("Bounty/Honor")
+                or ls:FindFirstChild("Bounty")
+                or ls:FindFirstChild("Honor")
+            if bv then b = bv.Value end
+        end
+        return t, b
+    end)
+    if ok then return t, b end
+    return "Neutral", 0
+end
+
+-- =============================================
+-- ALERT WEBHOOK
+-- =============================================
+local function sendAlert(reason)
+    if url == "" then return end
+    local req = (syn and syn.request) or (http and http.request)
+        or http_request or (fluxus and fluxus.request) or request
+    if not req then return end
+
+    local t, b = "Unknown", 0
+    pcall(function()
+        t = (Player.Team and Player.Team.Name) or "Neutral"
+        local ls = Player:FindFirstChild("leaderstats")
+        if ls then
+            local bv = ls:FindFirstChild("Bounty/Honor") or ls:FindFirstChild("Bounty") or ls:FindFirstChild("Honor")
+            if bv then b = bv.Value end
+        end
+    end)
+
+    pcall(function()
+        req({
+            Url    = url,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body   = HttpService:JSONEncode({
+                username   = "Onixy Bounty Tracker",
+                avatar_url = avatar,
+                embeds = {{
+                    author = {
+                        name     = "O N I X Y   H U B",
+                        icon_url = "https://cdn.discordapp.com/emojis/1258157823716757584.gif?size=128&animated=true"
+                    },
+                    title       = "Alert Notification",
+                    color       = 0xFF4444,
+                    description = string.format(
+                        "### STATUS ALERT\n> **Reason** `%s`\n\n```diff\n- Player  : %s\n- Bounty  : %s\n- Team    : %s\n- Time    : %s\n```",
+                        reason, Player.Name, fmt(b), t, os.date("%Y-%m-%d %H:%M:%S")
+                    ),
+                    footer    = { text = "Join → discord.gg/SkrS8Epa  •  " .. os.date("%Y-%m-%d %H:%M:%S") },
+                    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                }}
+            })
+        })
+    end)
+end
+
+-- Disconnect detection (alert only, no counter)
+pcall(function()
+    local NC = game:GetService("NetworkClient")
+    if NC then
+        NC.ChildRemoved:Connect(function()
+            sendAlert("Connection Lost / Disconnected")
+        end)
+    end
+end)
+
+-- =============================================
+-- RESET COMMAND ('rstat)
+-- =============================================
+local function cmd(msg)
+    if not msg or not msg:lower():find("'rstat") then return end
+    session = {
+        earned     = 0,
+        kills      = 0,
+        bountyLost = 0,
+        start      = os.time(),
+        milestones = {5e6, 10e6, 15e6, 20e6, 25e6, 30e6}
+    }
+    milestoneReached = {}
+    pcall(function()
+        writefile(sessionFile, HttpService:JSONEncode({
+            Earned     = 0,
+            Kills      = 0,
+            BountyLost = 0,
+            StartTime  = session.start,
+            LastSave   = os.time()
+        }))
+        StarterGui:SetCore("SendNotification", {
+            Title    = "Onixy Hub",
+            Text     = "Stats Reset!",
+            Icon     = icon,
+            Duration = 5
+        })
+    end)
+end
+
+Player.Chatted:Connect(cmd)
+pcall(function()
+    if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+        TextChatService.MessageReceived:Connect(function(m)
+            if m.TextSource and m.TextSource.UserId == Player.UserId then cmd(m.Text) end
+        end)
+    end
+end)
+
+-- =============================================
+-- FPS & PING TRACKER
+-- =============================================
+task.spawn(function()
+    while true do
+        local dt = task.wait()
+        local f  = (dt > 0) and (1 / dt) or 0
+        pcall(function()
+            ping = ping + Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+        end)
+        fps     = fps + f
+        samples = samples + 1
+        task.wait(1)
+    end
+end)
+
+-- =============================================
+-- SESSION TRACKER
+-- Detects kill (bounty up) and death (bounty down)
+-- =============================================
+task.spawn(function()
+    local lt, lb = getData()
+    while task.wait(2) do
+        local t, b = getData()
+        if b ~= 0 and b ~= lb and t == lt then
+            local diff = b - lb
+            local c    = math.abs(diff)
+            if c < 1e6 then
+                if diff > 0 then
+                    -- Bounty naik = kill
+                    session.earned = session.earned + c
+                    session.kills  = session.kills + 1
+                    warn("[Tracker] Kill! +" .. c .. " | Kills: " .. session.kills)
+                else
+                    -- Bounty turun = mati
+                    session.bountyLost = session.bountyLost + c
+                    session.earned     = session.earned - c
+                    warn("[Tracker] Death! -" .. c)
+                end
+            end
+        end
+        lt, lb = t, b
+
+        -- Save to file
+        if type(writefile) == "function" then
+            pcall(function()
+                writefile(userFile, HttpService:JSONEncode({
+                    User       = Player.Name,
+                    Earned     = session.earned,
+                    Kills      = session.kills,
+                    BountyLost = session.bountyLost,
+                    Bounty     = lb,
+                    Team       = lt,
+                    FPS        = (samples > 0 and math.floor(fps / samples)) or 0,
+                    Ping       = (samples > 0 and math.floor(ping / samples)) or 0,
+                    StartTime  = session.start,
+                    LastUpdate = os.time()
+                }))
+                writefile(sessionFile, HttpService:JSONEncode({
+                    Earned     = session.earned,
+                    Kills      = session.kills,
+                    BountyLost = session.bountyLost,
+                    StartTime  = session.start,
+                    LastSave   = os.time()
+                }))
+            end)
+        end
+    end
+end)
+
+-- =============================================
+-- PLAYER WATCHER (Death Detection)
+-- =============================================
+local function watchPlayer(p)
+    p.CharacterAdded:Connect(function(char)
+        local hum = char:WaitForChild("Humanoid", 10)
+        if not hum then return end
+        hum.Died:Connect(function()
+            local _, bountyBefore = getData()
+            task.delay(3, function()
+                local _, bountyAfter = getData()
+                if bountyAfter < bountyBefore then
+                    -- already handled by session tracker
+                end
+            end)
+        end)
+    end)
+    -- Also watch current character if already spawned
+    if p.Character then
+        local hum = p.Character:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            hum.Died:Connect(function()
+                local _, bountyBefore = getData()
+                task.delay(3, function()
+                    local _, bountyAfter = getData()
+                    if bountyAfter < bountyBefore then
+                        -- already handled by session tracker
+                    end
+                end)
+            end)
+        end
+    end
+end
+
+-- Watch all current players
+for _, p in pairs(Players:GetPlayers()) do
+    task.spawn(function() watchPlayer(p) end)
+end
+
+-- Watch new players joining
+Players.PlayerAdded:Connect(function(p)
+    watchPlayer(p)
+end)
+
+-- =============================================
+-- WEBHOOK SENDER
+-- =============================================
+task.spawn(function()
+    local req = (syn and syn.request) or (http and http.request)
+        or http_request or (fluxus and fluxus.request) or request
+    if not req then warn("[OnixyHub] No HTTP request function found!") return end
+
+    while true do
+        task.wait(interval)
+        if url == "" then continue end
+
+        local last = 0
+        pcall(function() if isfile(heartbeat) then last = tonumber(readfile(heartbeat)) or 0 end end)
+        if os.time() - last <= interval + 5 then continue end
+        pcall(writefile, heartbeat, tostring(os.time()))
+
+        local files = {}
+        pcall(function() files = listfiles(folder) end)
+        local users, maxTime = {}, 0
+
+        for _, f in pairs(files) do
+            if string.find(f, "User_") then
+                local ok, c = pcall(readfile, f)
+                if ok and c then
+                    local ok2, d = pcall(function() return HttpService:JSONDecode(c) end)
+                    if ok2 and d and (os.time() - (d.LastUpdate or 0)) < timeout then
+                        table.insert(users, d)
+                        local rt = os.time() - (d.StartTime or os.time())
+                        if rt > maxTime then maxTime = rt end
+                    end
+                end
+            end
+        end
+
+        if #users == 0 then continue end
+
+        local desc = ""
+        for i, u in pairs(users) do
+            if i > 1 then desc = desc .. "\n\n" end
+
+            desc = desc .. string.format("### USER %02d \xe2\x80\xa2 ||%s||\n", i, censor(u.User or "???"))
+            desc = desc .. string.format("> **Performance** `%d FPS` `%dms`\n\n", u.FPS or 0, u.Ping or 0)
+
+            local pct = math.min(100, math.floor(((u.Bounty or 0) / 30000000) * 100))
+            desc = desc .. "```ansi\n"
+            desc = desc .. bar(u.Bounty or 0, 30000000) .. "\n"
+            desc = desc .. string.format("%d%% Progress to 30M\n", pct)
+            desc = desc .. "```\n"
+
+            -- Calculate rate (bounty per hour)
+            local rt2 = os.time() - (u.StartTime or os.time())
+            local rate = "0/hr"
+            if rt2 > 0 then
+                rate = compact(math.abs(u.Earned or 0) / (rt2 / 3600)) .. "/hr"
+            end
+            local kills = u.Kills or 0
+
+            desc = desc .. "```diff\n"
+            desc = desc .. string.format("%s %s (%s)\n",
+                ((u.Earned or 0) >= 0 and "+") or "-",
+                fmt(math.abs(u.Earned or 0)), rate)
+            desc = desc .. string.format("  Current Bounty : %s\n",  fmt(u.Bounty or 0))
+            desc = desc .. string.format("  Kills          : %d\n",  kills)
+            desc = desc .. string.format("  Bounty Lost    : %s\n",  fmt(u.BountyLost or 0))
+            desc = desc .. "```"
+        end
+
+        desc = desc .. "\n```yaml\n"
+        desc = desc .. string.format("Runtime: %02dh %02dm %02ds\n",
+            math.floor(maxTime / 3600), math.floor((maxTime % 3600) / 60), maxTime % 60)
+        desc = desc .. string.format("Active Accounts: %d\n", #users)
+        desc = desc .. "```"
+        desc = desc .. "\n> 🌟 **[Click Here — Support & Join Our Server for Updates](https://discord.gg/SkrS8Epa)**"
+
+        pcall(function()
+            req({
+                Url    = url,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body   = HttpService:JSONEncode({
+                    username   = "Onixy Bounty Tracker",
+                    avatar_url = avatar,
+                    embeds = {{
+                        author = {
+                            name     = "O N I X Y   H U B",
+                            icon_url = "https://cdn.discordapp.com/emojis/1258157823716757584.gif?size=128&animated=true"
+                        },
+                        title       = "<a:_:1258451393019248650> Bounty Tracker System",
+                        color       = 0x00D9FF,
+                        description = desc,
+                        image       = { url = "https://cdn.discordapp.com/attachments/1405961118668558447/1473584606614650992/standard.gif?ex=6996be1c&is=69956c9c&hm=ae7848c1980adc76583698cf0cc04f09bdffcad9538371f553c00387f39cd1c4" },
+                        footer      = {
+                            text     = "Join for updates & support → discord.gg/SkrS8Epa  •  " .. os.date("%Y-%m-%d %H:%M:%S"),
+                            icon_url = footerIcon
+                        },
+                        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                    }}
+                })
+            })
+        end)
+    end
+end)
+
+print("[OnixyHub] Bounty Tracker v1.2 Active | Type 'rstat to reset stats")
+print("[OnixyHub] Tracking: Kills, BountyLost")
+print("[OnixyHub] Join Discord → discord.gg/SkrS8Epa")
