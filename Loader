@@ -1,0 +1,304 @@
+-- =============================================
+-- ONIXY HUB - LOADER
+-- Anti-Sus + Hitbox + Reconnect + GC
+-- Hooks into Bounty Tracker for kill/death detection
+-- =============================================
+
+repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
+
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local VIM = game:GetService("VirtualInputManager")
+local lp = Players.LocalPlayer
+local placeId = game.PlaceId
+local jobId = game.JobId
+
+-- =============================================
+-- ANTI-SUS
+-- =============================================
+local AntiSus = {}
+AntiSus.killCount = 0
+AntiSus.deathCount = 0
+AntiSus.isPausing = false
+AntiSus.isHopping = false
+AntiSus.victimLog = {}
+AntiSus.killedAt  = {}
+AntiSus.hopAt = math.random(4, 8)
+warn("[AntiSus] Hop after " .. AntiSus.hopAt .. " kills this session")
+
+function AntiSus.rand(a, b) return a + math.random() * (b - a) end
+
+function AntiSus.serverHop()
+    if AntiSus.isHopping then return end
+    AntiSus.isHopping = true
+    warn("[AntiSus] Server hopping...")
+    task.wait(AntiSus.rand(1.5, 3.0))
+    local ok = pcall(function()
+        local data = HttpService:JSONDecode(game:HttpGet(
+            "https://games.roblox.com/v1/games/"..placeId.."/servers/Public?sortOrder=Asc&limit=100"))
+        if data and data.data then
+            local list = {}
+            for _, s in pairs(data.data) do
+                if s.id ~= jobId and s.playing and s.maxPlayers and s.playing < s.maxPlayers then
+                    table.insert(list, s.id)
+                end
+            end
+            if #list > 0 then
+                TeleportService:TeleportToPlaceInstance(placeId, list[math.random(1,#list)], lp)
+            else
+                TeleportService:Teleport(placeId, lp)
+            end
+        end
+    end)
+    if not ok then pcall(function() TeleportService:Teleport(placeId, lp) end) end
+end
+
+-- =============================================
+-- BOUNTY WATCHER
+-- Hooks into leaderstats to detect kill & death
+-- Same logic as Bounty Tracker but used for anti-sus
+-- =============================================
+task.spawn(function()
+    -- Wait for leaderstats to exist
+    local ls = lp:WaitForChild("leaderstats", 30)
+    if not ls then warn("[AntiSus] No leaderstats found!") return end
+
+    local bv = ls:FindFirstChild("Bounty/Honor")
+        or ls:FindFirstChild("Bounty")
+        or ls:FindFirstChild("Honor")
+    if not bv then warn("[AntiSus] No bounty value found!") return end
+
+    local lastBounty = bv.Value
+    warn("[AntiSus] Bounty watcher active | Current: " .. lastBounty)
+
+    bv.Changed:Connect(function(newVal)
+        local diff = newVal - lastBounty
+        lastBounty = newVal
+
+        -- Ignore tiny fluctuations
+        if math.abs(diff) < 100 then return end
+
+        if diff > 0 then
+            -- Bounty went UP = kill confirmed
+            AntiSus.killCount = AntiSus.killCount + 1
+            warn("[AntiSus] KILL detected! +" .. diff .. " bounty | Total kills: " .. AntiSus.killCount)
+
+            -- Hop if total kill threshold reached
+            if AntiSus.killCount >= AntiSus.hopAt then
+                warn("[AntiSus] Kill threshold reached! Hopping...")
+                AntiSus.serverHop()
+                return
+            end
+
+            -- Kill cooldown before hunting next target
+            task.spawn(function()
+                AntiSus.isPausing = true
+                local cd = AntiSus.rand(1.5, 3.0)
+                task.wait(cd)
+
+                -- Long pause every 5 kills
+                if AntiSus.killCount % 5 == 0 then
+                    local p = AntiSus.rand(4.0, 8.0)
+                    warn("[AntiSus] Long pause " .. string.format("%.1f", p) .. "s")
+                    task.wait(p)
+                end
+
+                AntiSus.isPausing = false
+            end)
+
+        else
+            -- Bounty went DOWN = death detected
+            AntiSus.deathCount = AntiSus.deathCount + 1
+            warn("[AntiSus] DEATH detected! " .. diff .. " bounty | Deaths: " .. AntiSus.deathCount)
+
+            -- After death, wait longer before resuming (respawn + no-pvp window)
+            task.spawn(function()
+                AntiSus.isPausing = true
+                local respawnWait = AntiSus.rand(6.0, 10.0)
+                warn("[AntiSus] Waiting " .. string.format("%.1f", respawnWait) .. "s after death (respawn window)")
+                task.wait(respawnWait)
+                AntiSus.isPausing = false
+            end)
+        end
+    end)
+end)
+
+function AntiSus.isValidTarget(player)
+    if not player or player == lp then return false end
+    local char = player.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root and root.Position.Y > 3200 then return false end
+    local kt = AntiSus.killedAt[player.UserId]
+    if kt and (tick() - kt) < 60 then return false end
+    return true
+end
+
+getgenv().AntiSus = AntiSus
+warn("[AntiSus] v10 ready | Kill+Death detection via bounty watcher")
+
+-- =============================================
+-- STRAFE LOOP
+-- =============================================
+task.spawn(function()
+    while true do
+        task.wait(AntiSus.rand(0.6, 1.4))
+        if AntiSus.isPausing then continue end
+        local key = math.random() > 0.5 and Enum.KeyCode.A or Enum.KeyCode.D
+        VIM:SendKeyEvent(true, key, false, game)
+        task.wait(AntiSus.rand(0.2, 0.45))
+        VIM:SendKeyEvent(false, key, false, game)
+    end
+end)
+
+-- =============================================
+-- AUTO RECONNECT
+-- =============================================
+local function rejoin()
+    warn("[OnixyHub] Rejoining...")
+    task.wait(5)
+    pcall(function() TeleportService:TeleportToPlaceInstance(placeId, jobId, lp) end)
+end
+
+lp.OnTeleport:Connect(function(s) if s == Enum.TeleportState.Failed then rejoin() end end)
+game:GetService("NetworkClient").ChildRemoved:Connect(rejoin)
+lp.AncestryChanged:Connect(function(_, p) if not p then rejoin() end end)
+
+-- =============================================
+-- AUTO CLEAR CONSOLE
+-- =============================================
+task.spawn(function()
+    while true do
+        task.wait(5)
+        pcall(function() clearconsole() end)
+        pcall(function() consoleclear() end)
+        pcall(function() clrcon() end)
+        pcall(function() game:GetService("LogService"):ClearOutput() end)
+    end
+end)
+
+-- =============================================
+-- AUTO GC & MEMORY MONITOR
+-- =============================================
+task.spawn(function()
+    local lastMem = 0
+    while true do
+        task.wait(15)
+        pcall(function() collectgarbage("collect") end)
+        pcall(function() collectgarbage("step", 100) end)
+        local memMB = math.floor(gcinfo() / 1024)
+        local diff = memMB - lastMem
+        if diff > 50 then warn("[OnixyHub] Memory +"..diff.."MB | Total: "..memMB.."MB") end
+        lastMem = memMB
+    end
+end)
+
+-- =============================================
+-- ANTI-STUCK
+-- =============================================
+task.spawn(function()
+    _G.AntiStuckLoop = true
+    while _G.AntiStuckLoop do
+        VIM:SendKeyEvent(true, Enum.KeyCode.W, false, game)
+        VIM:SendKeyEvent(true, Enum.KeyCode.D, false, game)
+        task.wait(0.5)
+        VIM:SendKeyEvent(false, Enum.KeyCode.D, false, game)
+        VIM:SendKeyEvent(true, Enum.KeyCode.A, false, game)
+        task.wait(0.5)
+        VIM:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+        VIM:SendKeyEvent(false, Enum.KeyCode.A, false, game)
+        task.wait(0.7)
+    end
+end)
+
+-- =============================================
+-- HITBOX EXPANDER
+-- =============================================
+local function applyHitbox(char)
+    if not getgenv().Setting["Hitbox"].Enabled then return end
+    local s = getgenv().Setting["Hitbox"].Size
+    local t = getgenv().Setting["Hitbox"].Transparency
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root then
+        root.Size = Vector3.new(s, s, s)
+        root.Transparency = t
+        root.CanCollide = false
+    end
+end
+
+task.spawn(function()
+    task.wait(2)
+    pcall(function()
+        for _, v in pairs(workspace.Enemies:GetChildren()) do applyHitbox(v) end
+    end)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= lp and p.Character then applyHitbox(p.Character) end
+    end
+end)
+
+pcall(function()
+    workspace.Enemies.ChildAdded:Connect(function(v)
+        task.wait(0.1) pcall(function() applyHitbox(v) end)
+    end)
+end)
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        if p ~= lp then pcall(function() applyHitbox(char) end) end
+    end)
+end)
+
+for _, p in pairs(Players:GetPlayers()) do
+    if p ~= lp then
+        p.CharacterAdded:Connect(function(char)
+            task.wait(0.5) pcall(function() applyHitbox(char) end)
+        end)
+    end
+end
+
+task.spawn(function()
+    while task.wait(5) do
+        if getgenv().Setting["Hitbox"].Enabled then
+            pcall(function()
+                for _, v in pairs(workspace.Enemies:GetChildren()) do applyHitbox(v) end
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p ~= lp and p.Character then applyHitbox(p.Character) end
+                end
+            end)
+        end
+    end
+end)
+
+-- =============================================
+-- AUTO JUMP
+-- =============================================
+task.spawn(function()
+    while true do
+        task.wait(3)
+        pcall(function()
+            local char = lp.Character
+            if not char then return end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hum then return end
+            if hum.FloorMaterial ~= Enum.Material.Air then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+            VIM:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            task.wait(0.1)
+            VIM:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+        end)
+    end
+end)
+
+-- =============================================
+-- LOAD SCRIPTS (DO NOT EDIT)
+-- =============================================
+loadstring(game:HttpGet("https://raw.githubusercontent.com/rifanireal-create/fyarr/refs/heads/main/Bounty%20Tracker"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/obiiyeuem/vthangsitink/refs/heads/main/BananaCat-BountyEz.lua"))()
+wait(2)
+loadstring(game:HttpGet("https://raw.githubusercontent.com/SkibidiHub111/.lua/refs/heads/main/moudlefastattack"))()
