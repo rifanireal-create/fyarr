@@ -27,7 +27,7 @@ local Player         = Players.LocalPlayer
 local config  = getgenv().OnixyTracker or {}
 local wh      = config.discord or {}
 local url     = wh.webhook_url or ""
-local id      = wh.user_id or ""
+local uid     = wh.user_id or ""
 local enabled = wh.enabled or false
 
 if not enabled then return end
@@ -75,9 +75,11 @@ end
 local session = {
     earned      = 0,
     kills       = 0,
-    susKills    = 0,
     bountyLost  = 0,
-    start       = os.time()
+    start       = os.time(),
+    milestones  = {5e6, 10e6, 15e6, 20e6, 25e6, 30e6}
+}
+local milestoneReached = {}
 }
 local fps, ping, samples = 0, 0, 0
 
@@ -87,7 +89,6 @@ local function load()
     if ok and data and (os.time() - (data.LastSave or 0)) < 86400 then
         session.earned      = data.Earned      or 0
         session.kills       = data.Kills       or 0
-        session.susKills    = data.SusKills    or 0
         session.bountyLost  = data.BountyLost  or 0
         session.start       = data.StartTime   or os.time()
     end
@@ -138,12 +139,6 @@ local function censor(name)
         for i = 1, n do r = r .. (i%3==0 and "*" or name:sub(i,i)) end
     end
     return r
-end
-
--- Sus rate: sus kills / total kills * 100 (0-100%)
-local function susRate(kills, susKills)
-    if kills <= 0 then return 0 end
-    return math.clamp(math.floor((susKills / kills) * 100), 0, 100)
 end
 
 local function getData()
@@ -220,12 +215,12 @@ end)
 local function cmd(msg)
     if not msg or not msg:lower():find("'rstat") then return end
     session = {
-        earned = 0, kills = 0, susKills = 0, bountyLost = 0,
+        earned = 0, kills = 0, bountyLost = 0,
         start = os.time()
     }
     pcall(function()
         writefile(sessionFile, HttpService:JSONEncode({
-            Earned = 0, Kills = 0, SusKills = 0, BountyLost = 0,
+            Earned = 0, Kills = 0, BountyLost = 0,
             StartTime = session.start, LastSave = os.time()
         }))
         StarterGui:SetCore("SendNotification", {
@@ -292,7 +287,6 @@ task.spawn(function()
                     User        = Player.Name,
                     Earned      = session.earned,
                     Kills       = session.kills,
-                    SusKills    = session.susKills,
                     BountyLost  = session.bountyLost,
                     Bounty      = b,
                     Team        = t,
@@ -304,7 +298,6 @@ task.spawn(function()
                 writefile(sessionFile, HttpService:JSONEncode({
                     Earned      = session.earned,
                     Kills       = session.kills,
-                    SusKills    = session.susKills,
                     BountyLost  = session.bountyLost,
                     StartTime   = session.start,
                     LastSave    = os.time()
@@ -314,28 +307,6 @@ task.spawn(function()
     end
 end)
 
--- =============================================
--- SUSPICIOUS KILL DETECTOR
--- Hooks into Humanoid.Died of every player in server
--- If a player dies but our bounty doesn't go up within 3s = sus kill
--- =============================================
-local function watchPlayer(p)
-    if p == Players.LocalPlayer then return end
-    p.CharacterAdded:Connect(function(char)
-        local hum = char:WaitForChild("Humanoid", 10)
-        if not hum then return end
-        hum.Died:Connect(function()
-            -- Player died, check if our bounty goes up within 3 seconds
-            local _, bountyBefore = getData()
-            task.delay(3, function()
-                local _, bountyAfter = getData()
-                if bountyAfter <= bountyBefore then
-                    -- Bounty didn't go up = we killed them but got no reward = sus
-                    session.susKills = session.susKills + 1
-                    warn("[Tracker] ⚠️ Sus kill! " .. p.Name .. " died but bounty didn't increase" ..
-                         " | Sus: " .. session.susKills)
-                end
-            end)
         end)
     end)
     -- Also watch current character if already spawned
@@ -347,9 +318,6 @@ local function watchPlayer(p)
                 task.delay(3, function()
                     local _, bountyAfter = getData()
                     if bountyAfter <= bountyBefore then
-                        session.susKills = session.susKills + 1
-                        warn("[Tracker] ⚠️ Sus kill! " .. p.Name .. " died but bounty didn't increase" ..
-                             " | Sus: " .. session.susKills)
                     end
                 end)
             end)
@@ -366,13 +334,9 @@ end
 Players.PlayerAdded:Connect(function(p)
     watchPlayer(p)
 end)
-
--- Auto reset sus rate every 1 hour
 task.spawn(function()
     while true do
         task.wait(3600) -- 1 jam
-        session.susKills = 0
-        warn("[Tracker] Sus rate auto-reset (1 hour)")
     end
 end)
 
@@ -416,11 +380,6 @@ task.spawn(function()
 
         local desc = ""
         for i, u in pairs(users) do
-            local rt      = math.max(1, os.time() - (u.StartTime or os.time()))
-            local rate    = compact(math.max(0, (u.Earned/rt)*3600)) .. "/Hr"
-            local kills   = u.Kills    or 0
-            local sus     = u.SusKills or 0
-            local pctSus  = susRate(kills, sus)
 
             if i > 1 then desc = desc .. "\n\n" end
 
@@ -440,13 +399,6 @@ task.spawn(function()
             desc = desc .. string.format("  Current Bounty : %s\n",  fmt(u.Bounty or 0))
             desc = desc .. string.format("  Kills          : %d\n",  kills)
             desc = desc .. string.format("  Bounty Lost    : %s\n", fmt(u.BountyLost or 0))
-
-            -- Suspicious kill rate (simple %)
-            if pctSus == 0 then
-                desc = desc .. string.format("+ Sus Rate       : %d%%\n", pctSus)
-            else
-                desc = desc .. string.format("- Sus Rate       : %d%%\n", pctSus)
-            end
             desc = desc .. "```"
         end
 
@@ -455,7 +407,7 @@ task.spawn(function()
             math.floor(maxTime/3600), math.floor((maxTime%3600)/60), maxTime%60)
         desc = desc .. string.format("Active Accounts: %d\n", #users)
         desc = desc .. "```"
-        desc = desc .. "\n> [**Click Here to Join**](https://discord.gg/SkrS8Epa)"
+        desc = desc .. "\n> 🌟 **[Click Here — Support & Join Our Server for Updates](https://discord.gg/SkrS8Epa)**"
 
         pcall(function()
             req({
@@ -486,5 +438,5 @@ task.spawn(function()
 end)
 
 print("[OnixyHub] Bounty Tracker v1.2 Active | Type 'rstat to reset stats")
-print("[OnixyHub] Tracking: Kills, SusRate%")
+print("[OnixyHub] Tracking: Kills, BountyLost")
 print("[OnixyHub] Join Discord → discord.gg/SkrS8Epa")
