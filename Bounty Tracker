@@ -100,7 +100,7 @@ task.delay(3, function()
     pcall(function()
         StarterGui:SetCore("SendNotification", {
             Title    = "Onixy Hub | Bounty Tracker",
-            Text     = "Bounty Tracker active! Join discord.gg/SkrS8Epa",
+            Text     = "Bounty Tracker v1.2 active! Join discord.gg/SkrS8Epa",
             Icon     = icon,
             Duration = 8
         })
